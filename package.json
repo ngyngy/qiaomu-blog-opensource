@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "node scripts/build.cjs",
+    "build:cf": "node scripts/build.cjs",
     "test": "vitest",
     "test:run": "vitest run",
     "verify": "bash scripts/verify.sh full",
