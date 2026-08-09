@@ -1,4 +1,4 @@
-name = "nangongyuan-blog"
+name = "qiaomu-blog-opensource"
 main = "worker.ts"
 compatibility_date = "2026-04-14"
 compatibility_flags = ["nodejs_compat", "global_fetch_strictly_public"]
@@ -15,7 +15,7 @@ binding = "WORKERS_AI"
 
 [[services]]
 binding = "WORKER_SELF_REFERENCE"
-service = "nangongyuan-blog"
+service = "qiaomu-blog-opensource"
 
 # Minimal resource bindings for open-source / Deploy to Cloudflare usage.
 # Modern Wrangler and Deploy buttons can auto-provision these resources.
