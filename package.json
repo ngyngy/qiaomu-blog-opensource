@@ -4,8 +4,7 @@
   "private": false,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
-    "build:cf": "npx opennextjs-cloudflare build",
+    "build": "node scripts/build.cjs",
     "test": "vitest",
     "test:run": "vitest run",
     "verify": "bash scripts/verify.sh full",
