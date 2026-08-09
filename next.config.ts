@@ -22,6 +22,13 @@ const nextConfig: NextConfig = {
     workerThreads: false,
     cpus: 1,
   },
+
+  // 排除 @vercel/og（OG 图片生成）以减小 Worker 体积
+  // 本项目不使用 opengraph-image 路由，无需此模块
+  // 可节省约 2.2 MiB 未压缩体积（~1.5 MiB gzip）
+  outputFileTracingExcludes: {
+    "/**": ["./node_modules/next/dist/compiled/@vercel/og/**/*"],
+  },
 };
 
 export default nextConfig;
