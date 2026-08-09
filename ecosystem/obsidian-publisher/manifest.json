@@ -1,0 +1,10 @@
+{
+  "id": "nangongyuan-blog-publisher",
+  "name": "南宫远的博客 Publisher",
+  "version": "1.0.0",
+  "minAppVersion": "1.0.0",
+  "description": "一键发布笔记到 南宫远的博客 草稿",
+  "author": "nangongyuan",
+  "authorUrl": "https://github.com/ngyngy",
+  "isDesktopOnly": false
+}
