@@ -8,13 +8,13 @@
  * Solution: Use the OPENNEXT_INVOKED env var to detect whether we're being
  * called by OpenNext (inner call) or by Cloudflare directly (outer call).
  *
- * Outer call (Cloudflare):  next build → opennextjs-cloudflare build
+ * Outer call (Cloudflare):  next build → opennextjs-cloudflare build → stub @vercel/og
  * Inner call (by OpenNext): next build only (no recursion)
  *
- * Additionally: patches .nft.json files to remove @vercel/og references,
- * so OpenNext excludes the OG image generation module from the bundle.
- * This reduces the Worker size by ~2.2 MiB, keeping it under the
- * Cloudflare free plan 3 MiB limit.
+ * Additionally: after OpenNext build, replaces @vercel/og files with empty
+ * stubs to reduce Worker size below Cloudflare's free plan 3 MiB limit.
+ * @vercel/og (~2.2 MiB) is Next.js's OG image generation module. This project
+ * has no opengraph-image routes, so it's never used at runtime.
  */
 
 const { execSync } = require("child_process");
@@ -22,55 +22,87 @@ const fs = require("fs");
 const path = require("path");
 
 /**
- * Remove @vercel/og references from .nft.json trace files.
+ * Replace @vercel/og files with empty stubs after OpenNext build.
  *
- * OpenNext's patchVercelOgLibrary() scans .nft.json files to detect if
- * @vercel/og is used. If references are found, it includes the OG module
- * (~2.2 MiB) in the Worker bundle. Since this project has no
- * opengraph-image routes, we strip these references so OpenNext
- * automatically excludes @vercel/og.
+ * wrangler's esbuild follows module references in handler.mjs and includes
+ * @vercel/og files from node_modules/. By replacing them with empty stubs,
+ * the Worker bundle shrinks by ~2.2 MiB (uncompressed).
+ *
+ * This is safe because:
+ * - The project has no opengraph-image routes
+ * - No code imports ImageResponse from @vercel/og
+ * - The OG code paths in Next.js runtime are never reached
  */
-function stripVercelOgFromNft() {
-  const serverDir = path.join(process.cwd(), ".next", "server");
-  if (!fs.existsSync(serverDir)) {
-    console.log("[build] No .next/server directory found, skipping OG strip");
+function stubVercelOgFiles() {
+  const ogDir = path.join(
+    process.cwd(),
+    "node_modules",
+    "next",
+    "dist",
+    "compiled",
+    "@vercel",
+    "og"
+  );
+
+  if (!fs.existsSync(ogDir)) {
+    console.log("[build] @vercel/og directory not found, skipping stub");
     return;
   }
 
-  function findNftFiles(dir) {
-    const results = [];
+  // @vercel/og has "type": "module" in package.json — use ESM stubs for JS
+  const ESM_STUB = "export default {};\n";
+
+  let stubbedCount = 0;
+  let savedBytes = 0;
+
+  function processDir(dir) {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const fullPath = path.join(dir, entry.name);
       if (entry.isDirectory()) {
-        results.push(...findNftFiles(fullPath));
-      } else if (entry.name.endsWith(".nft.json")) {
-        results.push(fullPath);
+        processDir(fullPath);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+
+      const stat = fs.statSync(fullPath);
+      const originalSize = stat.size;
+
+      if (entry.name.endsWith(".wasm")) {
+        // Write empty file (0 bytes) — wrangler includes it as a binary asset
+        fs.writeFileSync(fullPath, Buffer.alloc(0));
+        console.log(
+          `[build] Stubbed ${path.relative(ogDir, fullPath)} (${(originalSize / 1024).toFixed(1)} KiB → 0 bytes)`
+        );
+        savedBytes += originalSize;
+        stubbedCount++;
+      } else if (
+        entry.name.endsWith(".js") ||
+        entry.name.endsWith(".mjs") ||
+        entry.name.endsWith(".cjs")
+      ) {
+        // Write ESM empty module
+        fs.writeFileSync(fullPath, ESM_STUB);
+        console.log(
+          `[build] Stubbed ${path.relative(ogDir, fullPath)} (${(originalSize / 1024).toFixed(1)} KiB → ESM stub)`
+        );
+        savedBytes += originalSize;
+        stubbedCount++;
+      } else if (entry.name.endsWith(".ttf")) {
+        // Font files — also stub them if bundled
+        fs.writeFileSync(fullPath, Buffer.alloc(0));
+        console.log(
+          `[build] Stubbed ${path.relative(ogDir, fullPath)} (${(originalSize / 1024).toFixed(1)} KiB → 0 bytes)`
+        );
+        savedBytes += originalSize;
+        stubbedCount++;
       }
     }
-    return results;
   }
 
-  const nftFiles = findNftFiles(serverDir);
-  let patched = 0;
-
-  for (const nftFile of nftFiles) {
-    const raw = fs.readFileSync(nftFile, "utf8");
-    const content = JSON.parse(raw);
-    if (!content.files) continue;
-
-    const originalLength = content.files.length;
-    content.files = content.files.filter(
-      (f) => !f.includes("@vercel/og")
-    );
-
-    if (content.files.length !== originalLength) {
-      fs.writeFileSync(nftFile, JSON.stringify(content));
-      patched++;
-    }
-  }
+  processDir(ogDir);
 
   console.log(
-    `[build] Stripped @vercel/og from ${patched}/${nftFiles.length} .nft.json files`
+    `[build] Stubbed ${stubbedCount} @vercel/og files, saved ~${(savedBytes / 1024).toFixed(1)} KiB`
   );
 }
 
@@ -80,8 +112,6 @@ if (isInnerBuild) {
   // Called by opennextjs-cloudflare build internally — just build Next.js
   console.log("[build] Inner call detected, running next build only");
   execSync("npx next build", { stdio: "inherit" });
-  // Strip @vercel/og from trace files BEFORE OpenNext bundles
-  stripVercelOgFromNft();
 } else {
   // Called by Cloudflare directly — build Next.js then OpenNext
   console.log("[build] Outer call, building Next.js + OpenNext");
@@ -91,5 +121,7 @@ if (isInnerBuild) {
     stdio: "inherit",
     env: { ...process.env, OPENNEXT_INVOKED: "1" },
   });
-  console.log("[build] OpenNext build complete");
+  console.log("[build] OpenNext build complete, stubbing @vercel/og files");
+  stubVercelOgFiles();
+  console.log("[build] All done");
 }
