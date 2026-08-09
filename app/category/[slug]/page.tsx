@@ -11,8 +11,8 @@ import { getSiteUrl } from '@/lib/site-config'
 const PAGE_SIZE = 25
 const BASE_URL = getSiteUrl()
 
-export const dynamicParams = true
-export const revalidate = 3600
+export const revalidate = 0
+export const dynamic = 'force-dynamic'
 
 function formatDate(ts: number) {
   return new Date(ts * 1000).toLocaleDateString('zh-CN', {

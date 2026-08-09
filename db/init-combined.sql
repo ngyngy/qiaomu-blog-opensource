@@ -1,3 +1,8 @@
+-- ============================================================
+-- D1 初始化脚本（合并 schema.sql + seed-template.sql）
+-- 在 Cloudflare Dashboard → D1 → Console 中一次性执行
+-- ============================================================
+
 -- 文章表
 CREATE TABLE posts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -7,27 +12,44 @@ CREATE TABLE posts (
   html TEXT NOT NULL,
   description TEXT,
   category TEXT DEFAULT '未分类',
-  tags TEXT, -- JSON 数组字符串
+  tags TEXT,
   status TEXT DEFAULT 'published' CHECK(status IN ('draft', 'published', 'deleted')),
-  password TEXT, -- 文章密码，NULL 表示公开
-  is_pinned INTEGER DEFAULT 0, -- 是否置顶
-  is_hidden INTEGER DEFAULT 0, -- 是否隐藏（unlisted）
-  cover_image TEXT, -- 封面图 URL
-  deleted_at INTEGER, -- 软删除时间戳，NULL 表示未删除
+  password TEXT,
+  is_pinned INTEGER DEFAULT 0,
+  is_hidden INTEGER DEFAULT 0,
+  cover_image TEXT,
+  deleted_at INTEGER,
   published_at INTEGER DEFAULT (strftime('%s', 'now')),
   updated_at INTEGER DEFAULT (strftime('%s', 'now')),
   view_count INTEGER DEFAULT 0
 );
 
--- 索引
 CREATE INDEX idx_posts_slug ON posts(slug);
 CREATE INDEX idx_posts_category ON posts(category);
 CREATE INDEX idx_posts_published ON posts(published_at DESC);
 
--- 全文搜索已移除：D1 的 FTS5 虚拟表不稳定，改用 LIKE 回退搜索
--- 如需启用，请单独执行 CREATE VIRTUAL TABLE 并确保触发器正常
+CREATE VIRTUAL TABLE posts_fts USING fts5(
+  title,
+  content,
+  content=posts,
+  content_rowid=id,
+  tokenize='unicode61'
+);
 
--- 分类统计表
+CREATE TRIGGER posts_ai AFTER INSERT ON posts BEGIN
+  INSERT INTO posts_fts(rowid, title, content)
+  VALUES (new.id, new.title, new.content);
+END;
+
+CREATE TRIGGER posts_au AFTER UPDATE ON posts BEGIN
+  UPDATE posts_fts SET title = new.title, content = new.content
+  WHERE rowid = new.id;
+END;
+
+CREATE TRIGGER posts_ad AFTER DELETE ON posts BEGIN
+  DELETE FROM posts_fts WHERE rowid = old.id;
+END;
+
 CREATE TABLE categories (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT UNIQUE NOT NULL,
@@ -35,13 +57,11 @@ CREATE TABLE categories (
   post_count INTEGER DEFAULT 0
 );
 
--- 站点设置表
 CREATE TABLE site_settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
 
--- AI 操作表：编辑器 Ask AI 面板的预设操作
 CREATE TABLE ai_actions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   action_key TEXT UNIQUE NOT NULL,
@@ -79,7 +99,6 @@ VALUES
    '你是专业翻译。把下面的内容翻译成自然流畅的英文，保持原文风格，直接返回翻译结果，不要解释。',
    0.2, 60, 1);
 
--- AI Provider 配置表（API Key 使用加密存储）
 CREATE TABLE ai_provider_profiles (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
@@ -99,7 +118,6 @@ CREATE TABLE ai_provider_profiles (
   updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
 );
 
--- 文章元数据生成器配置（摘要 / 标签 / slug / 封面）
 CREATE TABLE ai_post_generators (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   target_key TEXT UNIQUE NOT NULL,
@@ -181,7 +199,6 @@ INSERT INTO ai_post_generators (
     1
   );
 
--- API Token 表（外部工具认证）
 CREATE TABLE IF NOT EXISTS api_tokens (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   token TEXT UNIQUE NOT NULL,
@@ -193,8 +210,17 @@ CREATE TABLE IF NOT EXISTS api_tokens (
 
 CREATE INDEX idx_api_tokens_token ON api_tokens(token);
 
--- 插入默认分类
 INSERT INTO categories (name, slug) VALUES
   ('未分类', 'uncategorized'),
   ('AI工具', 'ai-tools'),
   ('AI', 'ai');
+
+-- ============================================================
+-- 默认站点设置
+-- ============================================================
+
+INSERT OR IGNORE INTO site_settings (key, value) VALUES
+  ('default_theme', 'refined'),
+  ('body_font', 'serif'),
+  ('nav_links', '[{"label":"推特","url":"https://x.com/nangongyuan","openInNewTab":true},{"label":"微博","url":"https://weibo.com/7594643421","openInNewTab":true},{"label":"RSS","url":"/feed.xml","openInNewTab":false}]'),
+  ('friend_links', '[{"label":"比特币导航站","url":"https://btc.ngy123.com"},{"label":"全球法币排行榜","url":"https://fabi.ngy123.com"},{"label":"以太坊资源导航","url":"https://eth.ngy123.com"},{"label":"高晓松资源下载","url":"https://gxs.ngy123.com"},{"label":"比特币资源下载站","url":"https://btczy.ngy123.com"},{"label":"Binance","url":"https://binance.ngy123.com"},{"label":"OKX","url":"https://okx.ngy123.com"},{"label":"天涯论坛","url":"https://tianya.ngy123.com"},{"label":"美女图库","url":"https://meinv.ngy123.com"},{"label":"出海导航","url":"https://chuhai.ngy123.com"}]');

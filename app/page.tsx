@@ -9,9 +9,9 @@ import { getSiteUrl } from '@/lib/site-config'
 const PAGE_SIZE = 25
 const BASE_URL = getSiteUrl()
 
-// Cloudflare Workers 缓存策略
-export const revalidate = 3600 // 1小时缓存
-export const dynamicParams = true
+// Cloudflare Workers: 禁用 ISR 缓存，确保发布后立即可见
+export const revalidate = 0
+export const dynamic = 'force-dynamic'
 
 export const metadata = {
   alternates: {

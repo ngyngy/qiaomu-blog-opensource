@@ -15,9 +15,9 @@ import { getPublicContentCacheNamespace } from '@/lib/cache'
 import { getSiteUrl } from '@/lib/site-config'
 import { resolvePostCoverImage } from '@/lib/default-cover-images'
 
-// Cloudflare Workers 缓存策略
-export const revalidate = 86400 // 24小时缓存
-export const dynamicParams = true
+// Cloudflare Workers: 禁用 ISR 缓存，防止 404 被缓存
+export const revalidate = 0
+export const dynamic = 'force-dynamic'
 
 export async function generateMetadata({
   params,
