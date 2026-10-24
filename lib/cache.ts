@@ -25,14 +25,50 @@ export function getPublicContentCacheNamespace(
   return shouldUsePublicContentCache(env) ? getCacheNamespace(env) : undefined
 }
 
+import { getSiteUrl } from '@/lib/site-config'
+import { clearMemoized } from '@/lib/server/memory-cache'
+import { purgeEdgeCacheUrls } from '@/lib/server/edge-cache'
+
+// 清除缓存（通过版本号机制）
+// slugs：需要额外失效的文章 slug（会一并清掉对应的伪静态边缘缓存）
 export async function invalidatePublicContentCache(
   env?: Partial<CloudflareEnv> | null,
+  slugs?: string[],
 ): Promise<boolean> {
+  await invalidatePublicEdgeCache(slugs)
+
   const cache = getPublicContentCacheNamespace(env)
   if (!cache) return false
 
   await invalidateCache(cache)
   return true
+}
+
+// 后台写完数据后，把对应的边缘缓存（伪静态层）也清掉。
+// 注意 caches.default 是按机房分布的，这里只影响当前 isolate 所在机房；
+// 其他机房最多再撑 EDGE_CACHE_TTL（默认 300 秒）。
+async function invalidatePublicEdgeCache(slugs?: string[]): Promise<void> {
+  try {
+    // 同一 isolate 内的记忆化缓存也要失效，否则后台改完自己看到的还是旧的
+    clearMemoized()
+
+    const base = getSiteUrl()
+    const urls = new Set<string>([
+      `${base}/`,
+      `${base}/feed.xml`,
+      `${base}/sitemap.xml`,
+    ])
+
+    for (const slug of slugs ?? []) {
+      if (!slug) continue
+      const clean = slug.replace(/^\/+|\/+$/g, '')
+      if (clean) urls.add(`${base}/${clean}`)
+    }
+
+    await purgeEdgeCacheUrls(Array.from(urls))
+  } catch {
+    // 清缓存失败不应该影响写入结果
+  }
 }
 
 export async function getCached<T>(

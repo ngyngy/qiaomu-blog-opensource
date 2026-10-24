@@ -1,4 +1,5 @@
 import { searchPosts, type Post, type PostWithTags } from '@/lib/db'
+import { memoize } from '@/lib/server/memory-cache'
 
 const VECTOR_NAMESPACE = 'posts'
 const DEFAULT_VECTOR_DIMENSIONS = 128
@@ -254,12 +255,37 @@ function scoreCandidate(candidate: PostWithTags, current: PostWithTags, currentT
   return score
 }
 
+// 打分只需要这些字段，不需要读取 content / html（每篇文章几 KB 到几十 KB）
+type RelatedCandidateRow = Pick<
+  Post,
+  | 'id'
+  | 'slug'
+  | 'title'
+  | 'description'
+  | 'category'
+  | 'tags'
+  | 'status'
+  | 'password'
+  | 'is_hidden'
+  | 'deleted_at'
+  | 'published_at'
+>
+
+function mapCandidate(row: RelatedCandidateRow): PostWithTags {
+  return {
+    ...(row as Post),
+    status: row.deleted_at ? 'deleted' : row.status || 'published',
+    tags: parseTags(row.tags),
+  }
+}
+
 async function getRuleBasedRelatedPosts(db: D1Database, current: PostWithTags, limit: number): Promise<PostWithTags[]> {
   const query = buildRelatedQuery(current)
   const fromSearch = query ? await searchPosts(db, query, Math.max(limit * 4, 12)) : []
   const recentResult = await db
     .prepare(
-      `SELECT * FROM posts
+      `SELECT id, slug, title, description, category, tags, status, password, is_hidden, deleted_at, published_at
+       FROM posts
        WHERE slug != ?
          AND status = 'published'
          AND password IS NULL
@@ -269,10 +295,10 @@ async function getRuleBasedRelatedPosts(db: D1Database, current: PostWithTags, l
        LIMIT ?`
     )
     .bind(current.slug, Math.max(limit * 12, 48))
-    .all<Post>()
+    .all<RelatedCandidateRow>()
 
   const merged = new Map<string, PostWithTags>()
-  for (const post of [...fromSearch, ...recentResult.results.map(mapPost)]) {
+  for (const post of [...fromSearch, ...recentResult.results.map(mapCandidate)]) {
     if (post.slug === current.slug) continue
     merged.set(post.slug, post)
   }
@@ -323,11 +349,26 @@ export async function searchPostsWithStrategy(
   }
 }
 
+// 「继续阅读」对同一篇文章是稳定的结果，没必要每次渲染都重算两条全表扫描式查询。
+// 这里在 isolate 内按 slug 记忆化 10 分钟。
+const RELATED_CACHE_TTL_MS = 600_000
+
 export async function getRelatedPosts(
   db: D1Database,
   env: Partial<CloudflareEnv> | null | undefined,
   post: PostWithTags,
   limit = 3,
+): Promise<RelatedSearchResult> {
+  return memoize(`related:${post.slug}:${limit}`, RELATED_CACHE_TTL_MS, () =>
+    computeRelatedPosts(db, env, post, limit),
+  )
+}
+
+async function computeRelatedPosts(
+  db: D1Database,
+  env: Partial<CloudflareEnv> | null | undefined,
+  post: PostWithTags,
+  limit: number,
 ): Promise<RelatedSearchResult> {
   const vectorResults = await tryVectorLookup(db, env, buildPostVectorText(post), post.slug, limit)
   if (vectorResults && vectorResults.length > 0) {

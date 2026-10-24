@@ -77,4 +77,9 @@ declare interface CloudflareEnv {
   ENABLE_WORKERS_AI?: string
   ENABLE_VECTOR_SEARCH?: string
   ENABLE_CF_IMAGE_PIPELINE?: string
+  // 伪静态边缘缓存（lib/server/edge-cache.ts）
+  EDGE_CACHE?: string
+  EDGE_CACHE_TTL?: string
+  EDGE_CACHE_TTL_FEED?: string
+  EDGE_CACHE_TTL_ASSET?: string
 }

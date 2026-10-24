@@ -49,6 +49,13 @@ WORKERS_AI_MODEL = "@cf/meta/llama-3.1-8b-instruct"
 # ENABLE_VECTOR_SEARCH = "true"
 # ENABLE_CF_IMAGE_PIPELINE = "true"
 
+# 伪静态边缘缓存（实现见 lib/server/edge-cache.ts，文档见 docs/d1-traffic-runbook.md）
+# 默认值已够用；以下注释解开即可覆盖。D1 行读取限额告警优先考虑调这里。
+# EDGE_CACHE = "off"             # 一键关闭整层
+# EDGE_CACHE_TTL = "300"         # 普通页面秒数，调小则新文章更快生效
+# EDGE_CACHE_TTL_FEED = "3600"   # sitemap.xml / feed.xml / robots.txt
+# EDGE_CACHE_TTL_ASSET = "86400" # 静态资源
+
 # Secrets（通过 wrangler secret put 设置）：
 # - ADMIN_PASSWORD
 # - ADMIN_TOKEN_SALT

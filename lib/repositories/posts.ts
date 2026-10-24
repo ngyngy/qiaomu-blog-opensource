@@ -1,4 +1,5 @@
 import { getCacheKey } from '@/lib/cache'
+import { memoize } from '@/lib/server/memory-cache'
 import { mapPostWithTags, parsePostTags } from '@/lib/repositories/post-mappers'
 import { ensureSchema, type Database } from '@/lib/repositories/schema'
 import type {
@@ -349,6 +350,9 @@ export async function getStats(
 }
 
 // 获取文章总数（默认只统计已发布）
+//
+// COUNT(*) 会扫过整张 posts 表，是首页最贵的一次查询。这里按参数组合做 60 秒
+// 记忆化：分页用的总数精确与否不影响正确性，短 TTL 足以挡住绝大部分重复扫描。
 export async function getPostsCount(
   db: Database,
   includeDrafts = false,
@@ -357,6 +361,21 @@ export async function getPostsCount(
   includeDeleted = false,
 ): Promise<number> {
   await ensureSchema(db)
+  const key = `posts:count:${includeDrafts ? 1 : 0}${includeEncrypted ? 1 : 0}${includeHidden ? 1 : 0}${includeDeleted ? 1 : 0}`
+  return memoize(key, COUNT_CACHE_TTL_MS, () =>
+    countPosts(db, includeDrafts, includeEncrypted, includeHidden, includeDeleted),
+  )
+}
+
+const COUNT_CACHE_TTL_MS = 60_000
+
+async function countPosts(
+  db: Database,
+  includeDrafts: boolean,
+  includeEncrypted: boolean,
+  includeHidden: boolean,
+  includeDeleted: boolean,
+): Promise<number> {
   const conditions: string[] = []
   if (!includeDrafts) {
     conditions.push("status = 'published'")
